@@ -2,86 +2,57 @@
 
 [Русская версия](README.RU.md)
 
-NotiPrint is a local Android app that stores important phone events and prints them on a Bluetooth Classic SPP thermal printer using ESC/POS raster commands.
+NotiPrint saves incoming SMS, missed calls, and calendar notifications on an Android phone, then prints them on a Bluetooth thermal printer. Large text on paper lets a family member receive an important message without opening the app.
 
-It is designed for a simple, large-text workflow: a family member does not need to open the app to receive a paper copy of an important event.
+Accepted events enter a local database before printing. The queue survives a restart, waits through the night interval, and retries when a printer is switched off or out of range. Event data stays on the phone.
 
-## Features
-
-- Prints incoming SMS, missed calls, and calendar notifications.
-- Saves every accepted event in a local Room queue before printing, then retries when the printer or Bluetooth connection becomes available.
-- Supports a configurable night interval: events are buffered overnight and printed in the morning.
-- Renders all content as a 384-dot monochrome bitmap, so Cyrillic text does not depend on the printer code page.
-- Works with paired 58 mm Bluetooth SPP / ESC-POS printers, including 384-dot models such as the MUNBYN IMP006.
-- Runs as a foreground service and requests a notification-listener rebind after app startup or device reboot.
-- Can ignore SMS from unknown numeric senders while still allowing alphabetic Sender IDs such as `МЧС` or `MCHS`.
-- Includes a local blacklist for SMS and missed calls. Add all numbers from a contact or enter a number/Sender ID manually.
-- Provides a diagnostic test page for checking print quality and paper coverage.
-
-## Requirements
-
-- Android Studio with the Android SDK installed.
-- A Gradle JDK compatible with the project, preferably JDK 17 or JDK 21.
-- An Android phone running Android 8.0 (API 26) or later.
-- A paired Bluetooth Classic SPP printer that supports ESC/POS raster printing (`GS v 0`).
-
-## Build
-
-Open the project root in Android Studio and select a compatible Gradle JDK in its Gradle settings if needed.
-
-From the project root, build a debug APK with one of these commands:
-
-```powershell
-.\gradlew.bat assembleDebug
+```mermaid
+flowchart TD
+    A[SMS or Android notification] --> B[Classification and sender filters]
+    B --> C[(Room event queue)]
+    C --> D[WorkManager print worker]
+    D --> E[384-dot text bitmap]
+    E --> F[ESC/POS raster commands]
+    F --> G[Bluetooth SPP thermal printer]
 ```
+
+## Engineering decisions
+
+- **Save before sending.** [Room](app/src/main/java/ru/notiprint/data/PrintJobDao.kt) stores event content and print status. Printer failures leave work in the queue; interrupted jobs return to it on the next run. WorkManager schedules immediate, morning, and delayed retry work.
+- **Serialize recovery with printing.** A shared [coroutine lock](app/src/main/java/ru/notiprint/printer/PrinterConnectionGate.kt) covers queue recovery, job selection, printing, and failure updates. All worker chains and the manual test use this lock, so a second worker cannot reclaim a job while the first sends it.
+- **Render text before transport.** The app renders Cyrillic as a [384-dot bitmap](app/src/main/java/ru/notiprint/printer/NotificationBitmapRenderer.kt), avoiding printer code-page settings. [ESC/POS raster bands](app/src/main/java/ru/notiprint/printer/EscPosRasterEncoder.kt) go over one Bluetooth Classic Serial Port Profile (SPP) connection without pauses between bands; each receipt ends with a flush and an estimated wait for the printer to finish.
+
+The app also includes a configurable night interval, a local sender blacklist, an option to ignore SMS from unknown numeric senders, and a diagnostic print page. Alphabetic Sender IDs such as `МЧС` remain eligible when the unknown-number filter is enabled.
+
+## Quick start
+
+Requirements: JDK 17, Android SDK Platform 35, an Android 8.0+ phone, and a paired 58 mm Bluetooth Classic SPP printer with 384-dot ESC/POS raster support (`GS v 0`), such as the MUNBYN IMP006.
 
 ```bash
-./gradlew assembleDebug
+./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-After a successful build, the APK is available at:
+On Windows, the build command is `.\gradlew.bat :app:assembleDebug`. An APK can also be copied to the phone and opened from its file manager.
 
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
+On first launch, select an already paired printer, grant the requested permissions and notification access, then run **Тестовая печать** (Test print). Background operation and autostart settings depend on the phone manufacturer. The default night interval is **22:00–08:00**.
 
-Build the optimized, non-debuggable APK with R8 and resource shrinking enabled:
-
-```powershell
-.\gradlew.bat assembleRelease
-```
+## Verification
 
 ```bash
-./gradlew assembleRelease
+./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease
+./gradlew :app:connectedDebugAndroidTest
 ```
 
-The resulting APK is available at:
+Local verification passed **21 JVM tests**, Android lint, and both debug and optimized release builds. The tests cover notification classification, printer timing, night intervals, retry backoff, and queue scenarios.
 
-```text
-app/build/outputs/apk/release/app-release.apk
-```
+The Android test APK also builds locally. Its **five instrumented tests** cover Room persistence and WorkManager scheduling, including 120 queued events drained by three workers. The API 35 CI job runs these tests; the second command above requires a running emulator or connected phone.
 
-The local release APK uses the standard debug certificate so it can be installed
-over previous debug builds. Configure a separate private release signing key
-before distributing the app through a store.
+[GitHub Actions](https://github.com/mzaprudin/notiprint/actions) provides build reports and APK artifacts. Both build variants use the local debug keystore; installing an update requires the same signing key. [Signing and installation details](docs/DEVELOPMENT.md#apk-signing-and-installation) explain how this affects local and CI builds.
 
-Use `--offline` only when the required Gradle dependencies have already been cached locally.
+## Documentation
 
-## Install and first run
+- [Architecture](docs/ARCHITECTURE.md): event handling, queue recovery, retry scheduling, and raster printing.
+- [Development and operation](docs/DEVELOPMENT.md): builds, permissions, installation, printer diagnostics, and device checks.
 
-For development, connect a phone with USB debugging enabled, select it in Android Studio, and press **Run**.
-
-For a regular installation, copy `app-release.apk` to the phone, open it with the file manager, and allow installation from that source when Android asks. Use the debug APK for development and diagnostics. USB debugging is not required for manual installation.
-
-On first launch:
-
-1. Grant Bluetooth/Nearby devices access and choose an already paired printer.
-2. Run **Test print** to confirm the connection and paper quality.
-3. Grant access to notifications, SMS, contacts, and call history as requested.
-4. In the phone settings, allow NotiPrint to start automatically and run in the background. The names of these settings differ between manufacturers.
-
-## Printer notes
-
-The app sends complete raster jobs over one SPP connection and flushes only after each receipt. This avoids the visible pauses often caused by line-by-line Bluetooth printing.
-
-The MUNBYN IMP006 specification recommends 58 mm thermal paper with a thickness of 0.06–0.08 mm. Paper thermal sensitivity and the printer battery level can noticeably affect coverage, especially in dense black areas.
+Licensed under [MIT](LICENSE).

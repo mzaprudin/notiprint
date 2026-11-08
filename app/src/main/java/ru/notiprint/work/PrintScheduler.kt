@@ -12,9 +12,6 @@ object PrintScheduler {
     private const val PRINT_NOW_WORK = "notiprint-print-now"
     private const val PRINT_RETRY_WORK = "notiprint-print-retry"
     private const val MORNING_WORK = "notiprint-morning-print"
-    private const val INITIAL_RETRY_DELAY_SECONDS = 15L
-    private const val MAX_RETRY_DELAY_SECONDS = 8 * 60L
-    private const val MAX_RETRY_EXPONENT = 5
     private const val RETRY_PREFERENCES = "notiprint_retry_state"
     private const val CONSECUTIVE_FAILURES = "consecutive_failures"
 
@@ -68,11 +65,9 @@ object PrintScheduler {
     private fun nextRetryDelaySeconds(context: Context): Long {
         val preferences = context.getSharedPreferences(RETRY_PREFERENCES, Context.MODE_PRIVATE)
         val failures = preferences.getInt(CONSECUTIVE_FAILURES, 0)
-        val exponent = failures.coerceAtMost(MAX_RETRY_EXPONENT)
-        val delay = (INITIAL_RETRY_DELAY_SECONDS * (1L shl exponent))
-            .coerceAtMost(MAX_RETRY_DELAY_SECONDS)
+        val delay = RetryBackoff.delaySeconds(failures)
         preferences.edit()
-            .putInt(CONSECUTIVE_FAILURES, (failures + 1).coerceAtMost(MAX_RETRY_EXPONENT + 1))
+            .putInt(CONSECUTIVE_FAILURES, RetryBackoff.nextFailureCount(failures))
             .apply()
         return delay
     }
