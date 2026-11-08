@@ -21,6 +21,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
     }
 
@@ -30,9 +31,9 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
 
-            // Keep local release APKs upgrade-compatible with the debug builds
-            // already installed on the target phones. A store distribution
-            // must replace this with a private release signing configuration.
+            // Local debug/release APKs share a certificate on the same machine.
+            // Fresh CI runners generate different debug keys; distributing
+            // upgrade-compatible APKs requires a persistent private signing key.
             signingConfig = signingConfigs.getByName("debug")
 
             proguardFiles(
@@ -80,6 +81,12 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core-ktx:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.work:work-testing:2.9.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

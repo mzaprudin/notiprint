@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.NotiPrint" parent="Base.Theme.NotiPrint">
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>
